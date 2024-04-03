@@ -1,8 +1,15 @@
 import scipy
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 import os
 
+torch.manual_seed(5473657658765383)
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print(device)
+
+'''
 class ImageDataset(Dataset):
     def __init__(self, annotations_file=None, img_dir=None, transform=None, target_transform=None):
         data_mat = scipy.io.loadmat('data/INSECTS/data.mat')
@@ -34,12 +41,17 @@ class DNADataset(Dataset):
         embedding = self.embeddings_dna[idx]
         label = self.labels[idx]
         return embedding, label
+
+image_data = ImageDataset()
+dna_data = DNADataset()
+'''
     
 class ImageDNADataset(Dataset):
     def __init__(self, annotations_file=None, img_dir=None, transform=None, target_transform=None):
         data_mat = scipy.io.loadmat('data/INSECTS/data.mat')
         self.embeddings_img = torch.from_numpy(data_mat['embeddings_img']).float()
         self.embeddings_dna = torch.from_numpy(data_mat['embeddings_dna']).float()
+        #self.labels = torch.from_numpy(data_mat['labels']).long()
         self.labels = torch.from_numpy(data_mat['labels']).long()
         self.species = data_mat['species']
         self.ids = data_mat['ids']
@@ -48,12 +60,99 @@ class ImageDNADataset(Dataset):
         return len(self.embeddings_dna)
 
     def __getitem__(self, idx):
-        embedding = torch.cat((self.embeddings_img[idx], self.embeddings_dna[idx]))
-        label = self.labels[idx]
+        embedding = torch.cat((self.embeddings_img[idx], self.embeddings_dna[idx])).view(1, -1)
+        label = self.labels[idx].item()
         return embedding, label
 
-image_data = ImageDataset()
-dna_data = DNADataset()
 image_dna_data = ImageDNADataset()
 
-print(image_dna_data[0][0].shape)
+class RandomCNN(nn.Module):
+    def __init__(self):
+        super(RandomCNN, self).__init__()
+        self.conv1 = nn.Conv1d(1, 16, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
+        self.conv2 = nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.fc1 = nn.Linear(32 * 637, 128)
+        self.fc2 = nn.Linear(128, 1041)
+
+    def forward(self, x):
+        # Convolutional layers
+        x = F.relu(self.conv1(x))
+        x = self.pool(x)
+        x = F.relu(self.conv2(x))
+        x = self.pool(x)
+        
+        # Flatten
+        x = x.view(-1, 32 * 637)
+        
+        # Fully connected layers
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+# Test the network with a random input tensor
+model = RandomCNN()
+model.to(device)
+print(f"Input shape: {image_dna_data[0][0].shape}")
+
+training_set, test_set = torch.utils.data.random_split(image_dna_data, [0.8, 0.2])
+
+# Create data loaders for our datasets; shuffle for training, not for validation
+training_loader = torch.utils.data.DataLoader(training_set, batch_size=4, shuffle=True)
+test_loader = torch.utils.data.DataLoader(test_set, batch_size=4, shuffle=False)
+
+inputs, labels = next(iter(training_loader))
+print(f"Training input batch: {inputs.shape}")
+print(f"Training label batch: {labels.shape}")
+inputs_test, labels_test = next(iter(test_loader))
+print(f"Test input batch: {inputs_test.shape}")
+print(f"Test label batch: {labels_test.shape}")
+
+# Report split sizes
+print('Training set has {} instances'.format(len(training_set)))
+print('Test set has {} instances'.format(len(test_set)))
+
+criterion = torch.nn.CrossEntropyLoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+epochs = 4
+
+for epoch in range(epochs):  # loop over the dataset multiple times
+
+    running_loss = 0.0
+    for i, data in enumerate(training_loader, 0):
+        # get the inputs; data is a list of [inputs, labels]
+        inputs, labels = data
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward + backward + optimize
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+
+        # print statistics
+        running_loss += loss.item()
+        if i % 2000 == 1999:    # print every 2000 mini-batches
+            print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
+            running_loss = 0.0
+
+print('Finished Training')
+
+correct = 0
+total = 0
+# since we're not training, we don't need to calculate the gradients for our outputs
+with torch.no_grad():
+    for data in test_loader:
+        inputs, labels = data
+        inputs, labels = inputs.to(device), labels.to(device)
+        # calculate outputs by running images through the network
+        outputs = model(inputs)
+        # the class with the highest energy is what we choose as prediction
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print(f'Accuracy of the network on the 10000 test inputs: {100 * correct // total} %')
