@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 from pytorch_wavelets import DWT1DForward
+import numpy as np
 import os
 
 torch.manual_seed(5473657658765383)
@@ -48,14 +49,24 @@ dna_data = DNADataset()
 '''
     
 class ImageDNADataset(Dataset):
-    def __init__(self, annotations_file=None, img_dir=None, transform=None, target_transform=None):
+    def __init__(self):
         data_mat = scipy.io.loadmat('data/INSECTS/data.mat')
         self.embeddings_img = torch.from_numpy(data_mat['embeddings_img']).float()
         self.embeddings_dna = torch.from_numpy(data_mat['embeddings_dna']).float()
-        #self.labels = torch.from_numpy(data_mat['labels']).long()
         self.labels = torch.from_numpy(data_mat['labels']).long()
+        # data_mat['G'] returns a ndarray of type uint16, therefore we convert into int16 before invoking from_numpy
+        self.G = torch.from_numpy(data_mat['G'].astype(np.int16)).long()
         self.species = data_mat['species']
         self.ids = data_mat['ids']
+
+        splits_mat = scipy.io.loadmat('data/INSECTS/splits.mat')
+        self.train_loc = torch.from_numpy(splits_mat['train_loc']).long()
+        self.trainval_loc = torch.from_numpy(splits_mat['trainval_loc']).long()
+        self.test_seen_loc = torch.from_numpy(splits_mat['test_seen_loc']).long()
+        self.test_unseen_loc = torch.from_numpy(splits_mat['test_unseen_loc']).long()
+        self.val_seen_loc = torch.from_numpy(splits_mat['val_seen_loc']).long()
+        self.val_unseen_loc = torch.from_numpy(splits_mat['val_unseen_loc']).long()
+
 
     def __len__(self):
         return len(self.embeddings_dna)
