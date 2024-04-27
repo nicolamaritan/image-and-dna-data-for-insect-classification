@@ -7,47 +7,9 @@ from pytorch_wavelets import DWT1DForward
 import numpy as np
 import os
 
-torch.manual_seed(5473657658765383)
+torch.manual_seed(0)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
-
-"""
-class ImageDataset(Dataset):
-    def __init__(self, annotations_file=None, img_dir=None, transform=None, target_transform=None):
-        data_mat = scipy.io.loadmat('data/INSECTS/data.mat')
-        self.embeddings_img = torch.from_numpy(data_mat['embeddings_img']).float()
-        self.labels = torch.from_numpy(data_mat['labels']).long()
-        self.species = data_mat['species']
-        self.ids = data_mat['ids']
-
-    def __len__(self):
-        return len(self.embeddings_img)
-
-    def __getitem__(self, idx):
-        embedding = self.embeddings_img[idx]
-        label = self.labels[idx]
-        return embedding, label
-    
-class DNADataset(Dataset):
-    def __init__(self, annotations_file=None, img_dir=None, transform=None, target_transform=None):
-        data_mat = scipy.io.loadmat('data/INSECTS/data.mat')
-        self.embeddings_dna = torch.from_numpy(data_mat['embeddings_dna']).float()
-        self.labels = torch.from_numpy(data_mat['labels']).long()
-        self.species = data_mat['species']
-        self.ids = data_mat['ids']
-
-    def __len__(self):
-        return len(self.embeddings_dna)
-
-    def __getitem__(self, idx):
-        embedding = self.embeddings_dna[idx]
-        label = self.labels[idx]
-        return embedding, label
-
-image_data = ImageDataset()
-dna_data = DNADataset()
-"""
-
 
 class ImageDNADataset(Dataset):
     def __init__(self, train=True):
@@ -64,7 +26,6 @@ class ImageDNADataset(Dataset):
             if train
             else np.concatenate((test_seen_loc, test_unseen_loc), axis=1)
         )
-        print(indeces.shape)
         # indeces.shape is (1, |indeces|), so we extract the whole list using [0]
         indeces = indeces[0]
         # Matlab indeces starts from 1
