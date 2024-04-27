@@ -60,10 +60,15 @@ class ImageDNADataset(Dataset):
         val_unseen_loc = splits_mat["val_unseen_loc"]
 
         indeces = (
-            trainval_loc if train else np.concatenate(test_seen_loc, test_unseen_loc)
+            trainval_loc
+            if train
+            else np.concatenate((test_seen_loc, test_unseen_loc), axis=1)
         )
+        print(indeces.shape)
         # indeces.shape is (1, |indeces|), so we extract the whole list using [0]
         indeces = indeces[0]
+        # Matlab indeces starts from 1
+        indeces -= 1
 
         data_mat = scipy.io.loadmat("data/INSECTS/data.mat")
         self.embeddings_img = torch.from_numpy(
@@ -128,6 +133,9 @@ model.to(device)
 print(f"Input shape: {image_dna_data[0][0].shape}")
 
 training_set, test_set = torch.utils.data.random_split(image_dna_data, [0.8, 0.2])
+
+training_set = ImageDNADataset(train=True)
+test_set = ImageDNADataset(train=False)
 
 batch_size = 32
 training_loader = torch.utils.data.DataLoader(
