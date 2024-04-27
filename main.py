@@ -8,10 +8,10 @@ import numpy as np
 import os
 
 torch.manual_seed(5473657658765383)
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(device)
 
-'''
+"""
 class ImageDataset(Dataset):
     def __init__(self, annotations_file=None, img_dir=None, transform=None, target_transform=None):
         data_mat = scipy.io.loadmat('data/INSECTS/data.mat')
@@ -46,42 +46,56 @@ class DNADataset(Dataset):
 
 image_data = ImageDataset()
 dna_data = DNADataset()
-'''
-    
+"""
+
+
 class ImageDNADataset(Dataset):
-    def __init__(self):
-        data_mat = scipy.io.loadmat('data/INSECTS/data.mat')
-        self.embeddings_img = torch.from_numpy(data_mat['embeddings_img']).float()
-        self.embeddings_dna = torch.from_numpy(data_mat['embeddings_dna']).float()
-        self.labels = torch.from_numpy(data_mat['labels']).long()
+    def __init__(self, train=True):
+        splits_mat = scipy.io.loadmat("data/INSECTS/splits.mat")
+        train_loc = splits_mat["train_loc"]
+        trainval_loc = splits_mat["trainval_loc"]
+        test_seen_loc = splits_mat["test_seen_loc"]
+        test_unseen_loc = splits_mat["test_unseen_loc"]
+        val_seen_loc = splits_mat["val_seen_loc"]
+        val_unseen_loc = splits_mat["val_unseen_loc"]
+
+        indeces = (
+            trainval_loc if train else np.concatenate(test_seen_loc, test_unseen_loc)
+        )
+        # indeces.shape is (1, |indeces|), so we extract the whole list using [0]
+        indeces = indeces[0]
+
+        data_mat = scipy.io.loadmat("data/INSECTS/data.mat")
+        self.embeddings_img = torch.from_numpy(
+            data_mat["embeddings_img"][indeces]
+        ).float()
+        self.embeddings_dna = torch.from_numpy(
+            data_mat["embeddings_dna"][indeces]
+        ).float()
+        self.labels = torch.from_numpy(data_mat["labels"][indeces]).long()
         # data_mat['G'] returns a ndarray of type uint16, therefore we convert into int16 before invoking from_numpy
-        self.G = torch.from_numpy(data_mat['G'].astype(np.int16)).long()
-        self.species = data_mat['species']
-        self.ids = data_mat['ids']
-
-        splits_mat = scipy.io.loadmat('data/INSECTS/splits.mat')
-        self.train_loc = torch.from_numpy(splits_mat['train_loc']).long()
-        self.trainval_loc = torch.from_numpy(splits_mat['trainval_loc']).long()
-        self.test_seen_loc = torch.from_numpy(splits_mat['test_seen_loc']).long()
-        self.test_unseen_loc = torch.from_numpy(splits_mat['test_unseen_loc']).long()
-        self.val_seen_loc = torch.from_numpy(splits_mat['val_seen_loc']).long()
-        self.val_unseen_loc = torch.from_numpy(splits_mat['val_unseen_loc']).long()
-
+        self.G = torch.from_numpy(data_mat["G"].astype(np.int16)).long()
+        self.species = data_mat["species"][indeces]
+        self.ids = data_mat["ids"][indeces]
 
     def __len__(self):
         return len(self.embeddings_dna)
 
     def __getitem__(self, idx):
-        embedding = torch.cat((self.embeddings_img[idx], self.embeddings_dna[idx])).view(1, 1, -1)
+        embedding = torch.cat(
+            (self.embeddings_img[idx], self.embeddings_dna[idx])
+        ).view(1, 1, -1)
         label = self.labels[idx].item()
 
-        dwt = DWT1DForward(wave='db6', J=1)
+        dwt = DWT1DForward(wave="db6", J=1)
         yl, yh = dwt(embedding)
         embedding = torch.cat((yl, yh[0]), dim=0).squeeze(1)
 
         return embedding, label
 
+
 image_dna_data = ImageDNADataset()
+
 
 class Wavelet1DCNN(nn.Module):
     def __init__(self):
@@ -98,14 +112,15 @@ class Wavelet1DCNN(nn.Module):
         x = self.pool(x)
         x = F.relu(self.conv2(x))
         x = self.pool(x)
-        
+
         # Flatten
         x = x.view(-1, 32 * 319)
-        
+
         # Fully connected layers
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x
+
 
 # Test the network with a random input tensor
 model = Wavelet1DCNN()
@@ -115,8 +130,12 @@ print(f"Input shape: {image_dna_data[0][0].shape}")
 training_set, test_set = torch.utils.data.random_split(image_dna_data, [0.8, 0.2])
 
 batch_size = 32
-training_loader = torch.utils.data.DataLoader(training_set, batch_size=batch_size, shuffle=True)
-test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=False)
+training_loader = torch.utils.data.DataLoader(
+    training_set, batch_size=batch_size, shuffle=True
+)
+test_loader = torch.utils.data.DataLoader(
+    test_set, batch_size=batch_size, shuffle=False
+)
 
 inputs, labels = next(iter(training_loader))
 print(f"Training input batch: {inputs.shape}")
@@ -126,8 +145,8 @@ print(f"Test input batch: {inputs_test.shape}")
 print(f"Test label batch: {labels_test.shape}")
 
 # Report split sizes
-print('Training set has {} instances'.format(len(training_set)))
-print('Test set has {} instances'.format(len(test_set)))
+print("Training set has {} instances".format(len(training_set)))
+print("Test set has {} instances".format(len(test_set)))
 
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
@@ -153,11 +172,11 @@ for epoch in range(epochs):  # loop over the dataset multiple times
         # print statistics
         running_loss += loss.item()
         print_step = 500
-        if i % print_step == print_step-1:
-            print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / print_step:.3f}')
+        if i % print_step == print_step - 1:
+            print(f"[{epoch + 1}, {i + 1:5d}] loss: {running_loss / print_step:.3f}")
             running_loss = 0.0
 
-print('Finished Training')
+print("Finished Training")
 
 correct = 0
 total = 0
@@ -173,4 +192,4 @@ with torch.no_grad():
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
 
-print(f'Accuracy of the network on the 10000 test inputs: {correct / total}')
+print(f"Accuracy of the network on the 10000 test inputs: {correct / total}")
