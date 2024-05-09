@@ -41,6 +41,10 @@ class ImageDNADataset(Dataset):
         self.labels = torch.from_numpy(data_mat["labels"][indeces]).long()
         # data_mat['G'] returns a ndarray of type uint16, therefore we convert into int16 before invoking from_numpy
         self.G = torch.from_numpy(data_mat["G"].astype(np.int16)).long()
+        self.genera = torch.empty(self.labels.shape)
+        for i in range(indeces.size):
+            self.genera[i][0] = self.G[self.labels[i][0] - 1][0] - 1040
+
         self.species = data_mat["species"][indeces]
         self.ids = data_mat["ids"][indeces]
 
