@@ -74,8 +74,10 @@ class Wavelet1DCNN(nn.Module):
         self.conv1 = nn.Conv1d(2, 16, kernel_size=3, stride=1, padding=1)
         self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
         self.conv2 = nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(32 * 319, 128)
-        self.fc2 = nn.Linear(128, 1041)
+        self.fc11 = nn.Linear(32 * 319, 128)
+        self.fc21 = nn.Linear(128, 1041)
+        self.fc12 = nn.Linear(32 * 319, 128)
+        self.fc22 = nn.Linear(128, 1041)
 
     def forward(self, x):
         # Convolutional layers
@@ -89,11 +91,11 @@ class Wavelet1DCNN(nn.Module):
         x_species = x.clone()
         x_genera = x.clone()
 
-        x_species = F.relu(self.fc1(x_species))
-        x_species = F.relu(self.fc2(x_species))
+        x_species = F.relu(self.fc11(x_species))
+        x_species = F.relu(self.fc21(x_species))
 
-        x_genera = F.relu(self.fc1(x_genera))
-        x_genera = F.relu(self.fc2(x_genera))
+        x_genera = F.relu(self.fc12(x_genera))
+        x_genera = F.relu(self.fc22(x_genera))
 
         return x_species, x_genera
 
@@ -178,6 +180,6 @@ with torch.no_grad():
         # the class with the highest energy is what we choose as prediction
         _, predicted_genera = torch.max(genera_outputs.data, 1)
         total_genera += labels.size(0)
-        correct_genera += (predicted_genera == labels).sum().item()
+        correct_genera += (predicted_genera == genera).sum().item()
 
 print(f"Accuracy of the network on the 10000 test inputs: {correct_genera / total_genera}")
