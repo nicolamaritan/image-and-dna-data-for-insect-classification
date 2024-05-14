@@ -105,7 +105,6 @@ model = Wavelet1DCNN()
 model.to(device)
 print(f"Input shape: {image_dna_data[0][0].shape}")
 
-training_set, test_set = torch.utils.data.random_split(image_dna_data, [0.8, 0.2])
 
 training_set = ImageDNADataset(train=True)
 test_set = ImageDNADataset(train=False)
@@ -170,16 +169,25 @@ print("Finished Training")
 
 correct_genera = 0
 total_genera = 0
-# since we're not training, we don't need to calculate the gradients for our outputs
+correct_labels = 0
+total_labels = 0
+
 with torch.no_grad():
     for data in test_loader:
         inputs, labels, genera = data
         inputs, labels, genera = inputs.to(device), labels.to(device), genera.to(device)
-        # calculate outputs by running images through the network
+        
         labels_outputs, genera_outputs = model(inputs)
-        # the class with the highest energy is what we choose as prediction
+        
         _, predicted_genera = torch.max(genera_outputs.data, 1)
-        total_genera += labels.size(0)
+        _, predicted_labels = torch.max(labels_outputs.data, 1)
+        
+        total_genera += genera.size(0)
+        total_labels += labels.size(0)
+        
         correct_genera += (predicted_genera == genera).sum().item()
+        correct_labels += (predicted_labels == labels).sum().item()
 
-print(f"Accuracy of the network on the 10000 test inputs: {correct_genera / total_genera}")
+
+print(f"Genera: Accuracy of the network on the {len(test_set)} test inputs: {correct_genera / total_genera}")
+print(f"Species: Accuracy of the network on the {len(test_set)} test inputs: {correct_labels / total_labels}")
