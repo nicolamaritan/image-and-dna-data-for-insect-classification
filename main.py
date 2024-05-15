@@ -14,12 +14,16 @@ print(device)
 class ImageDNADataset(Dataset):
     def __init__(self, train=True):
         splits_mat = scipy.io.loadmat("data/INSECTS/splits.mat")
-        train_loc = splits_mat["train_loc"]
-        trainval_loc = splits_mat["trainval_loc"]
-        test_seen_loc = splits_mat["test_seen_loc"]
-        test_unseen_loc = splits_mat["test_unseen_loc"]
-        val_seen_loc = splits_mat["val_seen_loc"]
-        val_unseen_loc = splits_mat["val_unseen_loc"]
+        train_loc = splits_mat["train_loc"]-1
+        trainval_loc = splits_mat["trainval_loc"]-1
+        test_seen_loc = splits_mat["test_seen_loc"]-1
+        test_unseen_loc = splits_mat["test_unseen_loc"]-1
+        val_seen_loc = splits_mat["val_seen_loc"]-1
+        val_unseen_loc = splits_mat["val_unseen_loc"]-1
+        
+        assert len(trainval_loc[0] == 19420)
+        assert len(test_seen_loc[0] == 4965)
+        assert len(test_unseen_loc[0] == 8463)
 
         indeces = (
             trainval_loc
@@ -28,8 +32,6 @@ class ImageDNADataset(Dataset):
         )
         # indeces.shape is (1, |indeces|), so we extract the whole list using [0]
         indeces = indeces[0]
-        # Matlab indeces starts from 1
-        indeces -= 1
 
         data_mat = scipy.io.loadmat("data/INSECTS/data.mat")
         self.embeddings_img = torch.from_numpy(
@@ -38,7 +40,38 @@ class ImageDNADataset(Dataset):
         self.embeddings_dna = torch.from_numpy(
             data_mat["embeddings_dna"][indeces]
         ).float()
-        self.labels = torch.from_numpy(data_mat["labels"][indeces]).long()
+
+
+        train_labels = data_mat["labels"][trainval_loc][0]
+        train_labels_mapping = {label: i for i, label in enumerate(np.unique(train_labels))}
+        train_labels_remapped = np.array([train_labels_mapping[label.item()] for label in train_labels])
+
+        test_unseen_labels = data_mat["labels"][test_unseen_loc][0]
+        test_unseen_labels_mapping = {label: i + 797 for i, label in enumerate(np.unique(test_unseen_labels))}
+        test_unseen_labels_remapped = np.array([test_unseen_labels_mapping[label.item()] for label in test_unseen_labels])
+        #test_unseen_labels_remapped += 797
+
+        assert np.intersect1d(train_labels, test_unseen_labels).size == 0
+
+        labels_mapping = train_labels_mapping | test_unseen_labels_mapping
+        #print(labels_mapping)
+        assert len(labels_mapping) == 1040
+
+        print(np.unique(train_labels_remapped))
+        print("culone")
+        print(np.unique(test_unseen_labels_remapped))
+
+        labels = data_mat["labels"][indeces]
+        remapped_labels = np.array([labels_mapping[label.item()] for label in labels])
+
+        self.remapped_labels = torch.from_numpy(remapped_labels).long()
+        self.labels = torch.from_numpy(labels).long()
+
+        if train:
+            assert len(torch.unique(self.remapped_labels)) == 797
+        else:
+            assert len(torch.unique(self.remapped_labels)) == 1013
+
         # data_mat['G'] returns a ndarray of type uint16, therefore we convert into int16 before invoking from_numpy
         self.G = torch.from_numpy(data_mat["G"].astype(np.int16)).long()
         self.genera = torch.empty(self.labels.shape).long()
@@ -55,7 +88,7 @@ class ImageDNADataset(Dataset):
         embedding = torch.cat(
             (self.embeddings_img[idx], self.embeddings_dna[idx])
         ).view(1, 1, -1)
-        label = self.labels[idx].item()
+        label = self.remapped_labels[idx].item()
         genera = self.genera[idx].item()
 
         dwt = DWT1DForward(wave="db6", J=1)
@@ -65,9 +98,6 @@ class ImageDNADataset(Dataset):
         return embedding, label, genera
 
 
-image_dna_data = ImageDNADataset()
-
-
 class Wavelet1DCNN(nn.Module):
     def __init__(self):
         super(Wavelet1DCNN, self).__init__()
@@ -75,9 +105,9 @@ class Wavelet1DCNN(nn.Module):
         self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
         self.conv2 = nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1)
         self.fc11 = nn.Linear(32 * 319, 128)
-        self.fc21 = nn.Linear(128, 1041)
+        self.fc21 = nn.Linear(128, 798)
         self.fc12 = nn.Linear(32 * 319, 128)
-        self.fc22 = nn.Linear(128, 1041)
+        self.fc22 = nn.Linear(128, 369)
 
     def forward(self, x):
         # Convolutional layers
@@ -103,8 +133,7 @@ class Wavelet1DCNN(nn.Module):
 # Test the network with a random input tensor
 model = Wavelet1DCNN()
 model.to(device)
-print(f"Input shape: {image_dna_data[0][0].shape}")
-
+#print(f"Input shape: {image_dna_data[0][0].shape}")
 
 training_set = ImageDNADataset(train=True)
 test_set = ImageDNADataset(train=False)
@@ -116,6 +145,10 @@ training_loader = torch.utils.data.DataLoader(
 test_loader = torch.utils.data.DataLoader(
     test_set, batch_size=batch_size, shuffle=False
 )
+
+print("training labels")
+for embedding, label, genera in training_set:
+    print(label)
 
 inputs, labels, genera = next(iter(training_loader))
 print(f"Training input batch: {inputs.shape}")
