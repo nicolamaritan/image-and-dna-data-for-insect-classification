@@ -76,7 +76,12 @@ class ImageDNADataset(Dataset):
         self.G = torch.from_numpy(data_mat["G"].astype(np.int16)).long()
         self.genera = torch.empty(self.labels.shape).long()
         for i in range(indeces.size):
-            self.genera[i][0] = self.G[self.labels[i][0] - 1][0] - 1040
+            self.genera[i][0] = self.G[self.labels[i][0] - 1][0] - 1041
+
+        if train:
+            assert len(self.genera) == 19420
+        else:
+            assert len(self.genera) == 13428
 
         self.species = data_mat["species"][indeces]
         self.ids = data_mat["ids"][indeces]
@@ -105,9 +110,9 @@ class Wavelet1DCNN(nn.Module):
         self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
         self.conv2 = nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1)
         self.fc11 = nn.Linear(32 * 319, 128)
-        self.fc21 = nn.Linear(128, 798)
+        self.fc21 = nn.Linear(128, 797)
         self.fc12 = nn.Linear(32 * 319, 128)
-        self.fc22 = nn.Linear(128, 369)
+        self.fc22 = nn.Linear(128, 368)
 
     def forward(self, x):
         # Convolutional layers
@@ -145,10 +150,6 @@ training_loader = torch.utils.data.DataLoader(
 test_loader = torch.utils.data.DataLoader(
     test_set, batch_size=batch_size, shuffle=False
 )
-
-print("training labels")
-for embedding, label, genera in training_set:
-    print(label)
 
 inputs, labels, genera = next(iter(training_loader))
 print(f"Training input batch: {inputs.shape}")
