@@ -97,14 +97,14 @@ class ImageDNADataset(Dataset):
         return embedding_img.view(1, -1), embedding_dna.view(1, -1), label, genera
 
 
-class Wavelet1DCNN(nn.Module):
+class CrossNet(nn.Module):
     def __init__(self):
-        super(Wavelet1DCNN, self).__init__()
+        super(CrossNet, self).__init__()
         # Pre-core network
         # Image embedding dimensionality reduction
         self.img_fc1 = nn.Linear(2048, 1024)
         self.img_fc2 = nn.Linear(1024, 500)
-        
+
         # Separate processing pipelines
         self.img_resblock1 = ResidualBlock1d(1)
         self.img_resblock2 = ResidualBlock1d(32)
@@ -112,19 +112,21 @@ class Wavelet1DCNN(nn.Module):
         self.dna_resblock1 = ResidualBlock1d(1)
         self.dna_resblock2 = ResidualBlock1d(32)
 
-        self.dwt = DWT1DForward(wave="db6", J=1)
-
-        # Convolutional layers
         self.conv1 = nn.Conv1d(32, 32, kernel_size=3, stride=1, padding=1)
         self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
         self.conv2 = nn.Conv1d(32, 32, kernel_size=3, stride=1, padding=1)
+        self.fc1 = nn.Linear(32000, 5120)
+
+        self.resblock1 = ResidualBlock1d(32)
+        self.resblock2 = ResidualBlock1d(32)
+        self.resblock3 = ResidualBlock1d(32)
         
         # Fully connected layers for classification
-        self.fc_species_1 = nn.Linear(32000, 128)
-        self.fc_species_2 = nn.Linear(128, 797)
+        self.fc_species_1 = nn.Linear(5120, 512)
+        self.fc_species_2 = nn.Linear(512, 797)
         
-        self.fc_genera_1 = nn.Linear(32000, 128)
-        self.fc_genera_2 = nn.Linear(128, 368)
+        self.fc_genera_1 = nn.Linear(5120, 512)
+        self.fc_genera_2 = nn.Linear(512, 368)
 
         # Dropout layers for regularization
         self.dropout = nn.Dropout(0.5)
@@ -140,13 +142,14 @@ class Wavelet1DCNN(nn.Module):
         x_dna = self.dna_resblock1(x_dna)
         x_dna = self.dna_resblock2(x_dna)
         
-        x = torch.cat((x_img, x_dna), axis=2)  #(batch_size, 32, 1284)
+        x = torch.cat((x_img, x_dna), axis=2)
 
-        # Convolutional layers
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        
+        # CrossNet core
+        x = F.relu(self.resblock1(x))
+        x = F.relu(self.resblock2(x))
+        x = F.relu(self.resblock3(x))
         x = x.view(x.shape[0], 32*1000)
+        x = self.dropout(F.relu(self.fc1(x)))
         
         x_species = x.clone()
         x_genera = x.clone()
@@ -165,20 +168,24 @@ class ResidualBlock1d(nn.Module):
         super(ResidualBlock1d, self).__init__()
         self.conv1 = nn.Conv1d(in_channels, 32, kernel_size=3, stride=1, padding=1)
         self.bn1 = nn.BatchNorm1d(32)
+        self.conv2 = nn.Conv1d(in_channels, 32, kernel_size=3, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm1d(32)
 
     def forward(self, x):
         identity = x
 
         out = self.conv1(x)
         out = self.bn1(out)
-
-        out += identity
         out = F.relu(out)
 
+        out = self.conv2(x)
+        out = self.bn2(out)
+        
+        out += identity
         return out
 
 # Test the network with a random input tensor
-model = Wavelet1DCNN()
+model = CrossNet()
 model.to(device)
 #print(f"Input shape: {image_dna_data[0][0].shape}")
 
@@ -211,7 +218,7 @@ print("Test set has {} instances".format(len(test_set)))
 
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-epochs = 20
+epochs = 5
 
 
 for epoch in range(epochs):  # loop over the dataset multiple times
