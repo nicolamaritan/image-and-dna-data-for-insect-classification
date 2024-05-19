@@ -106,22 +106,22 @@ class CrossNet(nn.Module):
         self.img_fc2 = nn.Linear(1024, 500)
 
         # Separate processing pipelines
-        self.img_resblock1 = ResidualBlock1d(1, 4, 4)
-        self.img_resblock2 = ResidualBlock1d(4, 4, 4)
+        self.img_resblock1 = ResidualBlock1d(1, 4)
+        self.img_resblock2 = ResidualBlock1d(4, 4)
         
-        self.dna_resblock1 = ResidualBlock1d(1, 4, 4)
-        self.dna_resblock2 = ResidualBlock1d(4, 4, 4)
+        self.dna_resblock1 = ResidualBlock1d(1, 4)
+        self.dna_resblock2 = ResidualBlock1d(4, 4)
 
-        self.resblock1 = ResidualBlock1d(4, 4, 4)
-        self.resblock2 = ResidualBlock1d(4, 4, 4)
-        self.resblock3 = ResidualBlock1d(4, 4, 4)
-        self.resblock4 = ResidualBlock1d(4, 4, 4)
+        self.resblock1 = ResidualBlock1d(4, 4)
+        self.resblock2 = ResidualBlock1d(4, 4)
+        self.resblock3 = ResidualBlock1d(4, 4)
+        self.resblock4 = ResidualBlock1d(4, 4)
         
         # Fully connected layers for classification
-        self.fc_species_1 = nn.Linear(10192, 2048)
+        self.fc_species_1 = nn.Linear(4*2548, 2048)
         self.fc_species_2 = nn.Linear(2048, 797)
         
-        self.fc_genera_1 = nn.Linear(10192, 2048)
+        self.fc_genera_1 = nn.Linear(4*2548, 2048)
         self.fc_genera_2 = nn.Linear(2048, 368)
 
         # Dropout layers for regularization
@@ -163,11 +163,11 @@ class CrossNet(nn.Module):
         return x_species, x_genera
 
 class ResidualBlock1d(nn.Module):
-    def __init__(self, in_channels, out_channels_hidden, out_channels):
+    def __init__(self, in_channels, out_channels):
         super(ResidualBlock1d, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels, out_channels_hidden, kernel_size=3, stride=1, padding=1)
-        self.bn1 = nn.BatchNorm1d(out_channels_hidden)
-        self.conv2 = nn.Conv1d(out_channels_hidden, out_channels, kernel_size=3, stride=1, padding=1)
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
         self.bn2 = nn.BatchNorm1d(out_channels)
 
     def forward(self, x):
@@ -187,6 +187,7 @@ class ResidualBlock1d(nn.Module):
 model = CrossNet()
 model.to(device)
 model.load_state_dict(torch.load("./model"))
+model.eval()
 
 test_set = ImageDNADataset(train=False)
 
