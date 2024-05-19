@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 from pytorch_wavelets import DWT1DForward
 import numpy as np
-import os
+import matplotlib.pyplot as plt
 
 torch.manual_seed(0)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -106,26 +106,26 @@ class CrossNet(nn.Module):
         self.img_fc2 = nn.Linear(1024, 500)
 
         # Separate processing pipelines
-        self.img_resblock1 = ResidualBlock1d(1, 32, 32)
-        self.img_resblock2 = ResidualBlock1d(32, 32, 32)
+        self.img_resblock1 = ResidualBlock1d(1, 4, 4)
+        self.img_resblock2 = ResidualBlock1d(4, 4, 4)
         
-        self.dna_resblock1 = ResidualBlock1d(1, 32, 32)
-        self.dna_resblock2 = ResidualBlock1d(32, 32, 32)
+        self.dna_resblock1 = ResidualBlock1d(1, 4, 4)
+        self.dna_resblock2 = ResidualBlock1d(4, 4, 4)
 
-        self.resblock1 = ResidualBlock1d(32, 32, 32)
-        self.resblock2 = ResidualBlock1d(32, 32, 32)
-        self.resblock3 = ResidualBlock1d(32, 32, 32)
-        self.fc1 = nn.Linear(32000, 5120)
+        self.resblock1 = ResidualBlock1d(4, 4, 4)
+        self.resblock2 = ResidualBlock1d(4, 4, 4)
+        self.resblock3 = ResidualBlock1d(4, 4, 4)
+        self.resblock4 = ResidualBlock1d(4, 4, 4)
         
         # Fully connected layers for classification
-        self.fc_species_1 = nn.Linear(5120, 512)
-        self.fc_species_2 = nn.Linear(512, 797)
+        self.fc_species_1 = nn.Linear(4000, 1024)
+        self.fc_species_2 = nn.Linear(1024, 797)
         
-        self.fc_genera_1 = nn.Linear(5120, 512)
-        self.fc_genera_2 = nn.Linear(512, 368)
+        self.fc_genera_1 = nn.Linear(4000, 1024)
+        self.fc_genera_2 = nn.Linear(1024, 368)
 
         # Dropout layers for regularization
-        self.conv_dropout = nn.Dropout(0.1)
+        self.conv_dropout = nn.Dropout(0.2)
         self.dropout = nn.Dropout(0.5)
 
     def forward(self, x_img, x_dna):
@@ -144,9 +144,11 @@ class CrossNet(nn.Module):
         # CrossNet core
         x = F.relu(self.resblock1(x))
         x = self.conv_dropout(F.relu(self.resblock2(x)))
-        x = self.conv_dropout(F.relu(self.resblock3(x)))
-        x = x.view(x.shape[0], 32*1000)
-        x = self.dropout(F.relu(self.fc1(x)))
+        x = F.relu(self.resblock3(x))
+        x = self.conv_dropout(F.relu(self.resblock4(x)))
+
+        x = x.view(x.shape[0], 4*1000)
+        #x = self.dropout(F.relu(self.fc1(x)))
         
         x_species = x.clone()
         x_genera = x.clone()
@@ -215,7 +217,7 @@ print("Test set has {} instances".format(len(test_set)))
 
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-epochs = 5
+epochs = 10
 
 
 for epoch in range(epochs):  # loop over the dataset multiple times
@@ -255,47 +257,60 @@ total_genera = 0
 correct_labels = 0
 total_labels = 0
 
-threshold = 0.1
+# Initialize lists to store accuracies
+species_accuracies = []
+genus_accuracies = []
 
+# Define the range of thresholds to test
+thresholds = np.linspace(0, 1, 50)  # Adjust the range and number of thresholds as needed
+
+# Assuming `model`, `test_loader`, and `device` are already defined
 with torch.no_grad():
-    for data in test_loader:
-        inputs_img, inputs_dna, labels, genera = data
-        inputs_img, inputs_dna, labels, genera = inputs_img.to(device), inputs_dna.to(device), labels.to(device), genera.to(device)
+    for threshold in thresholds:
+        correct_labels = 0
+        total_labels = 0
+        correct_genera = 0
+        total_genera = 0
 
-        labels_outputs, genera_outputs = model(inputs_img, inputs_dna)
+        for data in test_loader:
+            inputs_img, inputs_dna, labels, genera = data
+            inputs_img, inputs_dna, labels, genera = inputs_img.to(device), inputs_dna.to(device), labels.to(device), genera.to(device)
 
-        '''
-        predicted_labels_values, predicted_labels = torch.topk(labels_outputs.data, k=2, dim=1)
-        _, predicted_genera = torch.max(genera_outputs.data, 1)
+            labels_outputs, genera_outputs = model(inputs_img, inputs_dna)
 
-        #print(predicted_labels_values.shape)
+            labels_outputs = nn.Softmax(dim=1)(labels_outputs)
+            genera_outputs = nn.Softmax(dim=1)(genera_outputs)
 
-        for j in range(len(predicted_labels_values)):
-            if predicted_labels_values[j][0] - predicted_labels_values[j][1] < threshold:
-                correct_genera += (predicted_genera[j] == genera[j]).sum().item()
-                total_genera += 1
-            else:
-                correct_labels += (predicted_labels[j][0] == labels[j]).sum().item()
-                total_labels += 1
-        '''
-        predicted_labels_values, predicted_labels = torch.topk(labels_outputs.data, k=2, dim=1)
-        _, predicted_genera = torch.max(genera_outputs.data, 1)
+            predicted_labels_values, predicted_labels = torch.topk(labels_outputs.data, k=2, dim=1)
+            _, predicted_genera = torch.max(genera_outputs.data, 1)
 
-        # Compute the difference between the top two predicted label values
-        differences = predicted_labels_values[:, 0] - predicted_labels_values[:, 1]
+            differences = predicted_labels_values[:, 0] - predicted_labels_values[:, 1]
+            genera_mask = differences < threshold
+            labels_mask = ~genera_mask
 
-        # Create masks for the conditions
-        genera_mask = differences < threshold
-        labels_mask = ~genera_mask
+            correct_genera += (predicted_genera[genera_mask] == genera[genera_mask]).sum().item()
+            total_genera += genera_mask.sum().item()
 
-        # Update counts for genera predictions
-        correct_genera += (predicted_genera[genera_mask] == genera[genera_mask]).sum().item()
-        total_genera += genera_mask.sum().item()
+            correct_labels += (predicted_labels[labels_mask][:, 0] == labels[labels_mask]).sum().item()
+            total_labels += labels_mask.sum().item()
 
-        # Update counts for label predictions
-        correct_labels += (predicted_labels[labels_mask][:, 0] == labels[labels_mask]).sum().item()
-        total_labels += labels_mask.sum().item()
+        # Compute accuracies
+        species_accuracy = correct_labels / total_labels if total_labels > 0 else 0
+        genus_accuracy = correct_genera / total_genera if total_genera > 0 else 0
 
+        print("----------------------------------------------------------------------------------")
+        print(f"threshold: {threshold}")
+        print(f"Genera: Accuracy of the network on the {len(test_set)} test inputs with total_genera={total_genera}: {genus_accuracy}")
+        print(f"Species: Accuracy of the network on the {len(test_set)} test inputs with total_labels={total_labels}: {species_accuracy}")
+        print("----------------------------------------------------------------------------------")
 
-print(f"Genera: Accuracy of the network on the {len(test_set)} test inputs with total_genera={total_genera}: {correct_genera / total_genera}")
-print(f"Species: Accuracy of the network on the {len(test_set)} test inputs with total_labels={total_labels}: {correct_labels / total_labels}")
+        species_accuracies.append(species_accuracy)
+        genus_accuracies.append(genus_accuracy)
+
+# Plotting the curve
+plt.plot(species_accuracies, genus_accuracies, marker='o')
+plt.xlabel('Species Accuracy')
+plt.ylabel('Genus Accuracy')
+plt.title('Curve: Species Accuracy vs Genus Accuracy')
+plt.grid(True)
+plt.show()
