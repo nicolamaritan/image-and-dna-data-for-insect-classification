@@ -186,73 +186,15 @@ class ResidualBlock1d(nn.Module):
 # Test the network with a random input tensor
 model = CrossNet()
 model.to(device)
-#print(f"Input shape: {image_dna_data[0][0].shape}")
+model.load_state_dict(torch.load("./model"))
 
-training_set = ImageDNADataset(train=True)
 test_set = ImageDNADataset(train=False)
 
 batch_size = 32
-training_loader = torch.utils.data.DataLoader(
-    training_set, batch_size=batch_size, shuffle=True
-)
+
 test_loader = torch.utils.data.DataLoader(
     test_set, batch_size=batch_size, shuffle=False
 )
-
-
-inputs_img, inputs_dna, labels, genera = next(iter(training_loader))
-print(f"Training input batch: {inputs_img.shape}, {inputs_dna.shape}")
-print(f"Training label batch: {labels.shape}")
-print(f"Training genera batch: {genera.shape}")
-'''
-inputs_test, labels_test, genera_test = next(iter(test_loader))
-print(f"Test input batch: {inputs_test.shape}")
-print(f"Test label batch: {labels_test.shape}")
-print(f"Test genera batch: {genera.shape}")
-'''
-
-# Report split sizes
-print("Training set has {} instances".format(len(training_set)))
-print("Test set has {} instances".format(len(test_set)))
-
-criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-epochs = 5
-
-
-for epoch in range(epochs):  # loop over the dataset multiple times
-
-    running_labels_loss = 0.0
-    running_genera_loss = 0.0
-    for i, data in enumerate(training_loader, 0):
-        # get the inputs; data is a list of [inputs, labels]
-        inputs_img, inputs_dna, labels, genera = data
-        inputs_img, inputs_dna, labels, genera = inputs_img.to(device), inputs_dna.to(device), labels.to(device), genera.to(device)
-
-        # zero the parameter gradients
-        optimizer.zero_grad()
-
-        # forward + backward + optimize
-        labels_outputs, genera_outputs = model(inputs_img, inputs_dna)
-        labels_loss = criterion(labels_outputs, labels)
-        genera_loss = criterion(genera_outputs, genera)
-        total_loss = labels_loss + genera_loss
-        total_loss.backward()
-        optimizer.step()
-
-        # print statistics
-        running_labels_loss += labels_loss.item()
-        running_genera_loss += genera_loss.item()
-        print_step = 500
-        if i % print_step == print_step - 1:
-            print(f"[{epoch + 1}, {i + 1:5d}] labels loss: {running_labels_loss / print_step:.3f}")
-            print(f"[{epoch + 1}, {i + 1:5d}] genera loss: {running_genera_loss / print_step:.3f}")
-            running_labels_loss = 0.0
-            running_genera_loss = 0.0
-
-print("Finished Training")
-torch.save(model.state_dict(), "./model")
-exit(0)
 
 correct_genera = 0
 total_genera = 0
@@ -264,7 +206,7 @@ species_accuracies = []
 genus_accuracies = []
 
 # Define the range of thresholds to test
-thresholds = np.linspace(0, 1, 2)  # Adjust the range and number of thresholds as needed
+thresholds = np.linspace(0, 1, 20)  # Adjust the range and number of thresholds as needed
 
 # Assuming `model`, `test_loader`, and `device` are already defined
 with torch.no_grad():
