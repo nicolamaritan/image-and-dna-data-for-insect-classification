@@ -20,7 +20,7 @@ class ImageDNADataset(Dataset):
         test_unseen_loc = splits_mat["test_unseen_loc"]-1
         val_seen_loc = splits_mat["val_seen_loc"]-1
         val_unseen_loc = splits_mat["val_unseen_loc"]-1
-        
+
         assert len(trainval_loc[0] == 19420)
         assert len(test_seen_loc[0] == 4965)
         assert len(test_unseen_loc[0] == 8463)
@@ -57,10 +57,6 @@ class ImageDNADataset(Dataset):
         #print(labels_mapping)
         assert len(labels_mapping) == 1040
 
-        print(np.unique(train_labels_remapped))
-        print("culone")
-        print(np.unique(test_unseen_labels_remapped))
-
         labels = data_mat["labels"][indeces]
         remapped_labels = np.array([labels_mapping[label.item()] for label in labels])
 
@@ -90,50 +86,96 @@ class ImageDNADataset(Dataset):
         return len(self.embeddings_dna)
 
     def __getitem__(self, idx):
+        embedding_img = self.embeddings_img[idx]
+        embedding_dna = self.embeddings_dna[idx]
         embedding = torch.cat(
             (self.embeddings_img[idx], self.embeddings_dna[idx])
         ).view(1, 1, -1)
         label = self.remapped_labels[idx].item()
         genera = self.genera[idx].item()
 
-        dwt = DWT1DForward(wave="db6", J=1)
-        yl, yh = dwt(embedding)
-        embedding = torch.cat((yl, yh[0]), dim=0).squeeze(1)
-
-        return embedding, label, genera
+        return embedding_img.view(1, -1), embedding_dna.view(1, -1), label, genera
 
 
 class Wavelet1DCNN(nn.Module):
     def __init__(self):
         super(Wavelet1DCNN, self).__init__()
-        self.conv1 = nn.Conv1d(2, 16, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1)
-        self.fc11 = nn.Linear(32 * 319, 128)
-        self.fc21 = nn.Linear(128, 797)
-        self.fc12 = nn.Linear(32 * 319, 128)
-        self.fc22 = nn.Linear(128, 368)
+        # Pre-core network
+        # Image embedding dimensionality reduction
+        self.img_fc1 = nn.Linear(2048, 1024)
+        self.img_fc2 = nn.Linear(1024, 500)
+        
+        # Separate processing pipelines
+        self.img_resblock1 = ResidualBlock1d(1)
+        self.img_resblock2 = ResidualBlock1d(32)
+        
+        self.dna_resblock1 = ResidualBlock1d(1)
+        self.dna_resblock2 = ResidualBlock1d(32)
 
-    def forward(self, x):
+        self.dwt = DWT1DForward(wave="db6", J=1)
+
+        # Convolutional layers
+        self.conv1 = nn.Conv1d(32, 32, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
+        self.conv2 = nn.Conv1d(32, 32, kernel_size=3, stride=1, padding=1)
+        
+        # Fully connected layers for classification
+        self.fc_species_1 = nn.Linear(32000, 128)
+        self.fc_species_2 = nn.Linear(128, 797)
+        
+        self.fc_genera_1 = nn.Linear(32000, 128)
+        self.fc_genera_2 = nn.Linear(128, 368)
+
+        # Dropout layers for regularization
+        self.dropout = nn.Dropout(0.5)
+
+    def forward(self, x_img, x_dna):
+        # Reduce dimensionality of image embeddings
+        x_img = F.relu(self.img_fc1(x_img))
+        x_img = F.relu(self.img_fc2(x_img))
+        
+        x_img = self.img_resblock1(x_img)
+        x_img = self.img_resblock2(x_img)
+        
+        x_dna = self.dna_resblock1(x_dna)
+        x_dna = self.dna_resblock2(x_dna)
+        
+        x = torch.cat((x_img, x_dna), axis=2)  #(batch_size, 32, 1284)
+
         # Convolutional layers
         x = F.relu(self.conv1(x))
-        x = self.pool(x)
         x = F.relu(self.conv2(x))
-        x = self.pool(x)
-
-        # Flatten
-        x = x.view(-1, 32 * 319)
+        
+        x = x.view(x.shape[0], 32*1000)
+        
         x_species = x.clone()
         x_genera = x.clone()
-
-        x_species = F.relu(self.fc11(x_species))
-        x_species = F.relu(self.fc21(x_species))
-
-        x_genera = F.relu(self.fc12(x_genera))
-        x_genera = F.relu(self.fc22(x_genera))
-
+        
+        # Dropout for regularization
+        x_species = self.dropout(F.relu(self.fc_species_1(x_species)))
+        x_species = self.fc_species_2(x_species)
+        
+        x_genera = self.dropout(F.relu(self.fc_genera_1(x_genera)))
+        x_genera = self.fc_genera_2(x_genera)
+        
         return x_species, x_genera
 
+class ResidualBlock1d(nn.Module):
+    def __init__(self, in_channels):
+        super(ResidualBlock1d, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels, 32, kernel_size=3, stride=1, padding=1)
+        self.bn1 = nn.BatchNorm1d(32)
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+
+        out += identity
+        out = F.relu(out)
+
+        return out
 
 # Test the network with a random input tensor
 model = Wavelet1DCNN()
@@ -151,14 +193,17 @@ test_loader = torch.utils.data.DataLoader(
     test_set, batch_size=batch_size, shuffle=False
 )
 
-inputs, labels, genera = next(iter(training_loader))
-print(f"Training input batch: {inputs.shape}")
+
+inputs_img, inputs_dna, labels, genera = next(iter(training_loader))
+print(f"Training input batch: {inputs_img.shape}, {inputs_dna.shape}")
 print(f"Training label batch: {labels.shape}")
 print(f"Training genera batch: {genera.shape}")
+'''
 inputs_test, labels_test, genera_test = next(iter(test_loader))
 print(f"Test input batch: {inputs_test.shape}")
 print(f"Test label batch: {labels_test.shape}")
 print(f"Test genera batch: {genera.shape}")
+'''
 
 # Report split sizes
 print("Training set has {} instances".format(len(training_set)))
@@ -175,14 +220,14 @@ for epoch in range(epochs):  # loop over the dataset multiple times
     running_genera_loss = 0.0
     for i, data in enumerate(training_loader, 0):
         # get the inputs; data is a list of [inputs, labels]
-        inputs, labels, genera = data
-        inputs, labels, genera = inputs.to(device), labels.to(device), genera.to(device)
+        inputs_img, inputs_dna, labels, genera = data
+        inputs_img, inputs_dna, labels, genera = inputs_img.to(device), inputs_dna.to(device), labels.to(device), genera.to(device)
 
         # zero the parameter gradients
         optimizer.zero_grad()
 
         # forward + backward + optimize
-        labels_outputs, genera_outputs = model(inputs)
+        labels_outputs, genera_outputs = model(inputs_img, inputs_dna)
         labels_loss = criterion(labels_outputs, labels)
         genera_loss = criterion(genera_outputs, genera)
         total_loss = labels_loss + genera_loss
@@ -208,17 +253,17 @@ total_labels = 0
 
 with torch.no_grad():
     for data in test_loader:
-        inputs, labels, genera = data
-        inputs, labels, genera = inputs.to(device), labels.to(device), genera.to(device)
-        
-        labels_outputs, genera_outputs = model(inputs)
-        
+        inputs_img, inputs_dna, labels, genera = data
+        inputs_img, inputs_dna, labels, genera = inputs_img.to(device), inputs_dna.to(device), labels.to(device), genera.to(device)
+
+        labels_outputs, genera_outputs = model(inputs_img, inputs_dna)
+
         _, predicted_genera = torch.max(genera_outputs.data, 1)
         _, predicted_labels = torch.max(labels_outputs.data, 1)
-        
+
         total_genera += genera.size(0)
         total_labels += labels.size(0)
-        
+
         correct_genera += (predicted_genera == genera).sum().item()
         correct_labels += (predicted_labels == labels).sum().item()
 
