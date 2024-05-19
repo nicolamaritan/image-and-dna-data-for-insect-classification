@@ -106,20 +106,16 @@ class CrossNet(nn.Module):
         self.img_fc2 = nn.Linear(1024, 500)
 
         # Separate processing pipelines
-        self.img_resblock1 = ResidualBlock1d(1)
-        self.img_resblock2 = ResidualBlock1d(32)
+        self.img_resblock1 = ResidualBlock1d(1, 32, 32)
+        self.img_resblock2 = ResidualBlock1d(32, 32, 32)
         
-        self.dna_resblock1 = ResidualBlock1d(1)
-        self.dna_resblock2 = ResidualBlock1d(32)
+        self.dna_resblock1 = ResidualBlock1d(1, 32, 32)
+        self.dna_resblock2 = ResidualBlock1d(32, 32, 32)
 
-        self.conv1 = nn.Conv1d(32, 32, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool1d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv1d(32, 32, kernel_size=3, stride=1, padding=1)
+        self.resblock1 = ResidualBlock1d(32, 32, 32)
+        self.resblock2 = ResidualBlock1d(32, 32, 32)
+        self.resblock3 = ResidualBlock1d(32, 32, 32)
         self.fc1 = nn.Linear(32000, 5120)
-
-        self.resblock1 = ResidualBlock1d(32)
-        self.resblock2 = ResidualBlock1d(32)
-        self.resblock3 = ResidualBlock1d(32)
         
         # Fully connected layers for classification
         self.fc_species_1 = nn.Linear(5120, 512)
@@ -129,6 +125,7 @@ class CrossNet(nn.Module):
         self.fc_genera_2 = nn.Linear(512, 368)
 
         # Dropout layers for regularization
+        self.conv_dropout = nn.Dropout(0.1)
         self.dropout = nn.Dropout(0.5)
 
     def forward(self, x_img, x_dna):
@@ -146,8 +143,8 @@ class CrossNet(nn.Module):
 
         # CrossNet core
         x = F.relu(self.resblock1(x))
-        x = F.relu(self.resblock2(x))
-        x = F.relu(self.resblock3(x))
+        x = self.conv_dropout(F.relu(self.resblock2(x)))
+        x = self.conv_dropout(F.relu(self.resblock3(x)))
         x = x.view(x.shape[0], 32*1000)
         x = self.dropout(F.relu(self.fc1(x)))
         
@@ -164,12 +161,12 @@ class CrossNet(nn.Module):
         return x_species, x_genera
 
 class ResidualBlock1d(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, out_channels_hidden, out_channels):
         super(ResidualBlock1d, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels, 32, kernel_size=3, stride=1, padding=1)
-        self.bn1 = nn.BatchNorm1d(32)
-        self.conv2 = nn.Conv1d(in_channels, 32, kernel_size=3, stride=1, padding=1)
-        self.bn2 = nn.BatchNorm1d(32)
+        self.conv1 = nn.Conv1d(in_channels, out_channels_hidden, kernel_size=3, stride=1, padding=1)
+        self.bn1 = nn.BatchNorm1d(out_channels_hidden)
+        self.conv2 = nn.Conv1d(out_channels_hidden, out_channels, kernel_size=3, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm1d(out_channels)
 
     def forward(self, x):
         identity = x
@@ -178,7 +175,7 @@ class ResidualBlock1d(nn.Module):
         out = self.bn1(out)
         out = F.relu(out)
 
-        out = self.conv2(x)
+        out = self.conv2(out)
         out = self.bn2(out)
         
         out += identity
