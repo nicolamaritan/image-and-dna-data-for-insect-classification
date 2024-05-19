@@ -258,6 +258,8 @@ total_genera = 0
 correct_labels = 0
 total_labels = 0
 
+threshold = 0.1
+
 with torch.no_grad():
     for data in test_loader:
         inputs_img, inputs_dna, labels, genera = data
@@ -265,15 +267,38 @@ with torch.no_grad():
 
         labels_outputs, genera_outputs = model(inputs_img, inputs_dna)
 
+        '''
+        predicted_labels_values, predicted_labels = torch.topk(labels_outputs.data, k=2, dim=1)
         _, predicted_genera = torch.max(genera_outputs.data, 1)
-        _, predicted_labels = torch.max(labels_outputs.data, 1)
 
-        total_genera += genera.size(0)
-        total_labels += labels.size(0)
+        #print(predicted_labels_values.shape)
 
-        correct_genera += (predicted_genera == genera).sum().item()
-        correct_labels += (predicted_labels == labels).sum().item()
+        for j in range(len(predicted_labels_values)):
+            if predicted_labels_values[j][0] - predicted_labels_values[j][1] < threshold:
+                correct_genera += (predicted_genera[j] == genera[j]).sum().item()
+                total_genera += 1
+            else:
+                correct_labels += (predicted_labels[j][0] == labels[j]).sum().item()
+                total_labels += 1
+        '''
+        predicted_labels_values, predicted_labels = torch.topk(labels_outputs.data, k=2, dim=1)
+        _, predicted_genera = torch.max(genera_outputs.data, 1)
+
+        # Compute the difference between the top two predicted label values
+        differences = predicted_labels_values[:, 0] - predicted_labels_values[:, 1]
+
+        # Create masks for the conditions
+        genera_mask = differences < threshold
+        labels_mask = ~genera_mask
+
+        # Update counts for genera predictions
+        correct_genera += (predicted_genera[genera_mask] == genera[genera_mask]).sum().item()
+        total_genera += genera_mask.sum().item()
+
+        # Update counts for label predictions
+        correct_labels += (predicted_labels[labels_mask][:, 0] == labels[labels_mask]).sum().item()
+        total_labels += labels_mask.sum().item()
 
 
-print(f"Genera: Accuracy of the network on the {len(test_set)} test inputs: {correct_genera / total_genera}")
-print(f"Species: Accuracy of the network on the {len(test_set)} test inputs: {correct_labels / total_labels}")
+print(f"Genera: Accuracy of the network on the {len(test_set)} test inputs with total_genera={total_genera}: {correct_genera / total_genera}")
+print(f"Species: Accuracy of the network on the {len(test_set)} test inputs with total_labels={total_labels}: {correct_labels / total_labels}")
