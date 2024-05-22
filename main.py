@@ -3,9 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-from pytorch_wavelets import DWT1DForward
 import numpy as np
 import matplotlib.pyplot as plt
+from collections import defaultdict
 
 torch.manual_seed(0)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -41,25 +41,24 @@ class ImageDNADataset(Dataset):
             data_mat["embeddings_dna"][indeces]
         ).float()
 
-
+        # Remap train labels in [0, 796]
         train_labels = data_mat["labels"][trainval_loc][0]
         train_labels_mapping = {label: i for i, label in enumerate(np.unique(train_labels))}
         train_labels_remapped = np.array([train_labels_mapping[label.item()] for label in train_labels])
 
+        # Remap test labels in [797, 1039]
         test_unseen_labels = data_mat["labels"][test_unseen_loc][0]
         test_unseen_labels_mapping = {label: i + 797 for i, label in enumerate(np.unique(test_unseen_labels))}
         test_unseen_labels_remapped = np.array([test_unseen_labels_mapping[label.item()] for label in test_unseen_labels])
-        #test_unseen_labels_remapped += 797
 
         assert np.intersect1d(train_labels, test_unseen_labels).size == 0
 
+        # Union of the two mappings, allows to full remap all the labels
         labels_mapping = train_labels_mapping | test_unseen_labels_mapping
-        #print(labels_mapping)
         assert len(labels_mapping) == 1040
 
-        labels = data_mat["labels"][indeces]
+        labels = data_mat["labels"][indeces]  # Consider only train/test labels
         remapped_labels = np.array([labels_mapping[label.item()] for label in labels])
-
         self.remapped_labels = torch.from_numpy(remapped_labels).long()
         self.labels = torch.from_numpy(labels).long()
 
@@ -78,6 +77,22 @@ class ImageDNADataset(Dataset):
             assert len(self.genera) == 19420
         else:
             assert len(self.genera) == 13428
+
+        if (not train):
+            # Compute genera of unseen species
+            unseen_species_genera = []
+            for i in test_unseen_loc[0]:
+                unseen_species_genera.append(data_mat["G"][data_mat["labels"][i][0] - 1][0] - 1041)
+
+            self.unseen_species_genera = np.array(unseen_species_genera)
+            assert len(np.unique(self.unseen_species_genera)) == 134
+
+            # Compute unseen species
+            seen_species = []
+            for i in test_seen_loc[0]:
+                seen_species.append(labels_mapping[data_mat["labels"][i].item()])
+            self.seen_species = np.array(seen_species)
+            assert len(np.unique(self.seen_species)) == 770
 
         self.species = data_mat["species"][indeces]
         self.ids = data_mat["ids"][indeces]
@@ -108,7 +123,7 @@ class CrossNet(nn.Module):
         # Separate processing pipelines
         self.img_resblock1 = ResidualBlock1d(1, 4)
         self.img_resblock2 = ResidualBlock1d(4, 4)
-        
+
         self.dna_resblock1 = ResidualBlock1d(1, 4)
         self.dna_resblock2 = ResidualBlock1d(4, 4)
 
@@ -116,11 +131,11 @@ class CrossNet(nn.Module):
         self.resblock2 = ResidualBlock1d(4, 4)
         self.resblock3 = ResidualBlock1d(4, 4)
         self.resblock4 = ResidualBlock1d(4, 4)
-        
+
         # Fully connected layers for classification
         self.fc_species_1 = nn.Linear(4*2548, 2048)
         self.fc_species_2 = nn.Linear(2048, 797)
-        
+
         self.fc_genera_1 = nn.Linear(4*2548, 2048)
         self.fc_genera_2 = nn.Linear(2048, 368)
 
@@ -132,13 +147,13 @@ class CrossNet(nn.Module):
         # Reduce dimensionality of image embeddings
         #x_img = F.relu(self.img_fc1(x_img))
         #x_img = F.relu(self.img_fc2(x_img))
-        
+
         x_img = self.img_resblock1(x_img)
         x_img = self.img_resblock2(x_img)
-        
+
         x_dna = self.dna_resblock1(x_dna)
         x_dna = self.dna_resblock2(x_dna)
-        
+
         x = torch.cat((x_img, x_dna), axis=2)
 
         # CrossNet core
@@ -149,17 +164,17 @@ class CrossNet(nn.Module):
 
         x = x.view(x.shape[0], 4*2548)
         #x = self.dropout(F.relu(self.fc1(x)))
-        
+
         x_species = x.clone()
         x_genera = x.clone()
-        
+
         # Dropout for regularization
         x_species = self.dropout(F.relu(self.fc_species_1(x_species)))
         x_species = self.fc_species_2(x_species)
-        
+
         x_genera = self.dropout(F.relu(self.fc_genera_1(x_genera)))
         x_genera = self.fc_genera_2(x_genera)
-        
+
         return x_species, x_genera
 
 class ResidualBlock1d(nn.Module):
@@ -179,7 +194,7 @@ class ResidualBlock1d(nn.Module):
 
         out = self.conv2(out)
         out = self.bn2(out)
-        
+
         out += identity
         return out
 
@@ -218,7 +233,6 @@ print("Test set has {} instances".format(len(test_set)))
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 epochs = 5
-
 
 for epoch in range(epochs):  # loop over the dataset multiple times
 
