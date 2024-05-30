@@ -196,6 +196,7 @@ class ResidualBlock1d(nn.Module):
         out = self.bn2(out)
 
         out += identity
+        out = F.relu(out)
         return out
 
 # Test the network with a random input tensor
