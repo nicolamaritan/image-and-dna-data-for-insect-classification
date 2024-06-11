@@ -1,2 +1,4 @@
 data/
 model
+
+best_model_early_stopping.pth
